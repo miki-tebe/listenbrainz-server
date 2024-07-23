@@ -1,9 +1,11 @@
 import * as React from "react";
 
-import { Link, useLoaderData } from "react-router-dom";
+import { useLoaderData } from "react-router-dom";
 import { Helmet } from "react-helmet";
+import NiceModal from "@ebay/nice-modal-react";
 import LastFmImporter from "../../lastfm/LastFMImporter";
 import GlobalAppContext from "../../utils/GlobalAppContext";
+import SpotifyImporterModal from "../../lastfm/SpotifyImporterModal";
 
 type ImportLoaderData = {
   user_has_email: boolean;
@@ -125,22 +127,54 @@ export default function Import() {
         />
       )}
 
-      <br />
-      <h4> Reset Last.fm import timestamp </h4>
-      <p>
-        If you think that a import has missed listens, you can reset your
-        previous import timestamp. This will cause your next import to be a
-        complete import, which will add missing listens without adding
-        duplicates to your history.
-      </p>
-
-      <p>
-        <span className="btn btn-info btn-lg">
-          <Link to="/settings/resetlatestimportts/" style={{ color: "white" }}>
-            Reset import timestamp
-          </Link>
-        </span>
-      </p>
+      {userHasEmail && (
+        <div className="Importer">
+          <h4>Spotify extended streaming history</h4>
+          <p>
+            Spotify allows you to download you lifetime music history, but it
+            will take a few steps and a bit of time:
+            <ol>
+              <li>
+                You can request your lifetime streaming history in{" "}
+                <a href="https://www.spotify.com/us/account/privacy/">
+                  your Spotify account privacy settings
+                </a>{" "}
+                under <b>&quot;Extended streaming history&quot;</b>
+              </li>
+              <li>
+                You will receive a confirmation email from Spotify and need to
+                click a link to confirm your request to download your data
+              </li>
+              <li>
+                The request may take up to 30 days to prepare, after which
+                Spotify will send you an email with a download link
+              </li>
+              <li>
+                Once you have downloaded the archive file (.zip), extract it
+              </li>
+              <li>Upload the .json files</li>
+            </ol>
+          </p>
+          <div className="alert alert-warning">
+            Please note that due to limitations with Spotify&apos;s timestamp
+            precision, importing your history may create duplicates if you have
+            already been tracking your Spotify listening history with
+            ListenBrainz. To avoid bad surprises, you can specify start and end
+            dates to limit your import to a specific window of time.
+          </div>
+          <button
+            className="btn btn-default"
+            type="button"
+            onClick={() => {
+              NiceModal.show(SpotifyImporterModal);
+            }}
+            data-toggle="modal"
+            data-target="#SpotifyImporter"
+          >
+            Open the Spotify importer
+          </button>
+        </div>
+      )}
     </>
   );
 }

@@ -319,31 +319,6 @@ export default class LastFmImporter extends React.Component<
     this.startImport();
   };
 
-  submitSpotifyStreams = async (text: string) => {
-    const streams: Array<SpotifyStream> = JSON.parse(text);
-    const listens = streams
-      .filter(
-        (stream) =>
-          stream.ms_played > 30000 &&
-          stream.master_metadata_track_name &&
-          stream.master_metadata_album_artist_name
-      )
-      .map((stream) => {
-        return {
-          listened_at: new Date(stream.ts).getTime() / 1000,
-          track_metadata: {
-            track_name: stream.master_metadata_track_name,
-            artist_name: stream.master_metadata_album_artist_name,
-            release_name: stream.master_metadata_album_album_name,
-            additional_info: {
-              spotify_id: stream.spotify_track_uri,
-            },
-          },
-        } as Listen;
-      });
-    await this.APIService.submitListens(this.userToken, "import", listens);
-  };
-
   importFeedback = async () => {
     const { lastfmUsername, service } = this.state;
     if (!lastfmUsername || service !== "lastfm") {
@@ -377,24 +352,6 @@ export default class LastFmImporter extends React.Component<
         </div>
       );
     }
-  };
-
-  handleSpotifyImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const fr = new FileReader();
-    fr.onload = (e) => {
-      this.submitSpotifyStreams(e?.target?.result as string);
-    };
-    if (
-      !event ||
-      !event.target ||
-      !event.target.files ||
-      !event.target.files[0]
-    ) {
-      // eslint-disable-next-line no-console
-      console.log("Invalid file!");
-      return;
-    }
-    fr.readAsText(event.target.files[0]);
   };
 
   async importLoop() {
@@ -691,19 +648,25 @@ export default class LastFmImporter extends React.Component<
             <br />
           </LastFMImporterModal>
         )}
-        <form onSubmit={(e) => e.preventDefault()}>
-          <span className="btn btn-default btn-primary">
-            Spotify Extended Streaming
+        <hr />
+        <h4> Reset Last.fm import timestamp </h4>
+        <p>
+          If you think that a import has missed listens, you can reset your
+          previous import timestamp. This will cause your next import to be a
+          complete import, which will add missing listens without adding
+          duplicates to your history.
+        </p>
+
+        <p>
+          <span className="btn btn-info">
+            <Link
+              to="/settings/resetlatestimportts/"
+              style={{ color: "white" }}
+            >
+              Reset import timestamp
+            </Link>
           </span>
-          <input
-            id="spotify-import-file"
-            type="file"
-            onChange={this.handleSpotifyImport}
-          />
-          <button className="btn btn-success" type="submit">
-            Import Now!
-          </button>
-        </form>
+        </p>
       </div>
     );
   }
