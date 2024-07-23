@@ -13,6 +13,8 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { capitalize, set } from "lodash";
 import { toast } from "react-toastify";
 import { Link } from "react-router-dom";
+import { parseSpotifyExtendedHistory } from "@kellnerd/listenbrainz/parser/spotify";
+import { formatListen } from "@kellnerd/listenbrainz/listen";
 import NiceModal, { useModal } from "@ebay/nice-modal-react";
 import DateTimePicker from "react-datetime-picker/dist/entry.nostyle";
 import { format } from "date-fns";
@@ -61,6 +63,70 @@ export default NiceModal.create(() => {
   const [endDatetime, setEndDatetime] = React.useState<Date | null>(null);
 
   const submitSpotifyStreams = async (text: string) => {
+    if (!currentUser.auth_token) {
+      toast.warning("You must be logged in to import your Spotify history");
+      return;
+    }
+    let listensToSubmit = [];
+    // const streams: Array<SpotifyStream> = JSON.parse(text);
+    try {
+      const history = parseSpotifyExtendedHistory(text, {
+        includeDebugInfo: true,
+      });
+      // eslint-disable-next-line no-restricted-syntax
+      for (const listen of history) {
+        set(
+          listen,
+          "track_metadata.additional_info?.submission_client",
+          "ListenBrainz web + @kellnerd/listenbrainz parser"
+        );
+        console.debug(formatListen(listen));
+        listensToSubmit.push(listen);
+      }
+      if (startDatetime || endDatetime) {
+        listensToSubmit = listensToSubmit.filter(
+          (listen) => {
+            if (
+              startDatetime &&
+              listen.listened_at <= startDatetime.getTime() / 1000
+            ) {
+              return false;
+            }
+            if (
+              endDatetime &&
+              listen.listened_at >= endDatetime.getTime() / 1000
+            ) {
+              return false;
+            }
+            return true;
+          }
+          //     listen.track_metadata.additional_info?.duration_ms &&
+          //     listen.track_metadata.additional_info?.duration_ms > 18e4 // 3 minutes played
+        );
+      }
+      console.debug(`Submitting ${listensToSubmit.length} listens`);
+      try {
+        await APIService.submitListens(
+          currentUser.auth_token,
+          "import",
+          listensToSubmit
+        );
+      } catch (error) {
+        toast.error(
+          <ToastMsg
+            title="An error occured while importing Spotify history"
+            message={error.toString()}
+          />
+        );
+      }
+    } catch (error) {
+      toast.error(
+        <ToastMsg
+          title="An error occured while parsing the Spotify history file"
+          message={error.toString()}
+        />
+      );
+    }
   };
 
   const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
