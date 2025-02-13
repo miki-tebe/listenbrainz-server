@@ -143,26 +143,13 @@ export default function BrainzPlayer() {
     userPreferences?.brainzplayer?.soundcloudEnabled === false &&
     userPreferences?.brainzplayer?.appleMusicEnabled === false;
 
-  // BrainzPlayerContext
-  const {
-    currentListen,
-    currentListenIndex,
-    currentDataSourceIndex,
-    currentTrackName,
-    currentTrackArtist,
-    currentTrackAlbum,
-    currentTrackURL,
-    playerPaused,
-    isActivated,
-    volume,
-    durationMs,
-    progressMs,
-    listenSubmitted,
-    continuousPlaybackTime,
-    queue,
-    ambientQueue,
-    queueRepeatMode,
-  } = useBrainzPlayerContext();
+  const brainzPlayerContext = useBrainzPlayerContext();
+  const brainzPlayerContextRef = React.useRef(brainzPlayerContext);
+
+  // Keep the ref updated with the latest state value
+  React.useEffect(() => {
+    brainzPlayerContextRef.current = brainzPlayerContext;
+  }, [brainzPlayerContext]);
 
   const dispatch = useBrainzPlayerDispatch();
 
@@ -228,30 +215,10 @@ export default function BrainzPlayer() {
   }, [sortedDataSources]);
 
   const playerStateTimerID = React.useRef<NodeJS.Timeout | null>(null);
-  const queueRef = React.useRef<BrainzPlayerQueue>(queue);
-  queueRef.current = queue;
-  const ambientQueueRef = React.useRef<BrainzPlayerQueue>(ambientQueue);
-  ambientQueueRef.current = ambientQueue;
-  const currentListenRef = React.useRef(currentListen);
-  currentListenRef.current = currentListen;
-  const currentDataSourceIndexRef = React.useRef(currentDataSourceIndex);
-  currentDataSourceIndexRef.current = currentDataSourceIndex;
-  const isActivatedRef = React.useRef(isActivated);
-  isActivatedRef.current = isActivated;
-  const currentTrackNameRef = React.useRef(currentTrackName);
-  currentTrackNameRef.current = currentTrackName;
-  const listenSubmittedRef = React.useRef(listenSubmitted);
-  listenSubmittedRef.current = listenSubmitted;
-  const currentListenIndexRef = React.useRef(currentListenIndex);
-  currentListenIndexRef.current = currentListenIndex;
-  const playerPausedRef = React.useRef(playerPaused);
-  playerPausedRef.current = playerPaused;
-  const continuousPlaybackTimeRef = React.useRef(continuousPlaybackTime);
-  continuousPlaybackTimeRef.current = continuousPlaybackTime;
 
   // Functions
   const alertBeforeClosingPage = (event: BeforeUnloadEvent) => {
-    if (!playerPausedRef.current) {
+    if (!brainzPlayerContextRef.current.playerPaused) {
       // Some old browsers may allow to set a custom message, but this is deprecated.
       event.preventDefault();
       // eslint-disable-next-line no-param-reassign
@@ -270,13 +237,15 @@ export default function BrainzPlayer() {
     async (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       if (event.key === "BrainzPlayer_stop") {
-        const dataSource = dataSourceRefs[currentDataSourceIndex]?.current;
-        if (dataSource && !playerPaused) {
+        const dataSource =
+          dataSourceRefs[brainzPlayerContextRef.current.currentDataSourceIndex]
+            ?.current;
+        if (dataSource && !brainzPlayerContextRef.current.playerPaused) {
           await dataSource.togglePlay();
         }
       }
     },
-    [currentDataSourceIndex, dataSourceRefs, playerPaused]
+    [dataSourceRefs]
   );
 
   const stopOtherBrainzPlayers = (): void => {
@@ -329,17 +298,18 @@ export default function BrainzPlayer() {
 
   // Set Title
   const updateWindowTitleWithTrackName = () => {
-    const trackName = currentTrackNameRef?.current || "";
+    const trackName = brainzPlayerContextRef.current.currentTrackName || "";
     setCurrentHTMLTitle(`🎵 ${trackName}`);
   };
 
-  const reinitializeWindowTitle = () => {
+  const reinitializeWindowTitle = React.useCallback(() => {
     setCurrentHTMLTitle(htmlTitle);
-  };
+  }, [htmlTitle]);
 
   const invalidateDataSource = React.useCallback(
     (dataSource?: DataSourceTypes, message?: string | JSX.Element): void => {
-      let dataSourceIndex = currentDataSourceIndex;
+      let dataSourceIndex =
+        brainzPlayerContextRef.current.currentDataSourceIndex;
       if (dataSource) {
         dataSourceIndex = dataSourceRefs.findIndex(
           (source) => source.current === dataSource
@@ -352,10 +322,19 @@ export default function BrainzPlayer() {
         dataSourceRefs.splice(dataSourceIndex, 1);
       }
     },
-    [currentDataSourceIndex, dataSourceRefs]
+    [dataSourceRefs]
   );
 
   const getListenMetadataToSubmit = (): BaseListenFormat => {
+    const {
+      currentDataSourceIndex,
+      currentTrackName,
+      currentTrackArtist,
+      currentTrackAlbum,
+      currentTrackURL,
+      currentListen,
+      durationMs,
+    } = brainzPlayerContextRef.current;
     const dataSource = dataSourceRefs[currentDataSourceIndex];
 
     const brainzplayer_metadata = {
@@ -394,7 +373,7 @@ export default function BrainzPlayer() {
         // submission_client_version:"",
         music_service: musicServiceDomain,
         music_service_name: musicServiceName,
-        origin_url: currentTrackURL,
+        origin_url: currentTrackURL, // This ends up being the url of the previous play
       },
     });
     return newListen;
@@ -405,7 +384,8 @@ export default function BrainzPlayer() {
     listen: BaseListenFormat,
     retries: number = 3
   ): Promise<void> => {
-    const dataSource = dataSourceRefs[currentDataSourceIndex];
+    const dataSource =
+      dataSourceRefs[brainzPlayerContextRef.current.currentDataSourceIndex];
     if (!currentUser || !currentUser.auth_token) {
       return;
     }
@@ -457,7 +437,12 @@ export default function BrainzPlayer() {
   };
 
   const checkProgressAndSubmitListen = async () => {
-    if (!currentUser?.auth_token || listenSubmittedRef.current) {
+    const {
+      continuousPlaybackTime,
+      listenSubmitted,
+      durationMs,
+    } = brainzPlayerContextRef.current;
+    if (!currentUser?.auth_token || listenSubmitted) {
       return;
     }
     let playbackTimeRequired = SUBMIT_LISTEN_AFTER_MS;
@@ -467,7 +452,7 @@ export default function BrainzPlayer() {
         durationMs - SUBMIT_LISTEN_UPDATE_INTERVAL
       );
     }
-    if (continuousPlaybackTimeRef.current >= playbackTimeRequired) {
+    if (continuousPlaybackTime >= playbackTimeRequired) {
       const listen = getListenMetadataToSubmit();
       dispatch({ listenSubmitted: true });
       await submitListenToListenBrainz("single", listen);
@@ -485,69 +470,79 @@ export default function BrainzPlayer() {
     }
   );
 
-  const playListen = async (
-    listen: BrainzPlayerQueueItem,
-    nextListenIndex: number,
-    datasourceIndex: number = 0
-  ): Promise<void> => {
-    dispatch({
-      currentListen: listen,
-      currentListenIndex: nextListenIndex,
-      isActivated: true,
-      listenSubmitted: false,
-      continuousPlaybackTime: 0,
-    });
-
-    window.postMessage(
-      {
-        brainzplayer_event: "current-listen-change",
-        payload: omit(listen, "id"),
-      },
-      window.location.origin
-    );
-
-    let selectedDatasourceIndex: number;
-    if (datasourceIndex === 0) {
-      /** If available, retrieve the service the listen was listened with */
-      const listenedFromIndex = dataSourceRefs.findIndex((datasourceRef) => {
-        const { current } = datasourceRef;
-        return isListenFromDatasource(listen, current);
+  const playListen = React.useCallback(
+    async (
+      listen: BrainzPlayerQueueItem,
+      nextListenIndex: number,
+      datasourceIndex: number = 0
+    ): Promise<void> => {
+      dispatch({
+        currentListen: listen,
+        currentListenIndex: nextListenIndex,
+        isActivated: true,
+        listenSubmitted: false,
+        continuousPlaybackTime: 0,
       });
-      selectedDatasourceIndex =
-        listenedFromIndex === -1 ? 0 : listenedFromIndex;
-    } else {
-      /** If no matching datasource was found, revert to the default bahaviour
-       * (try playing from source 0 or try next source)
-       */
-      selectedDatasourceIndex = datasourceIndex;
-    }
 
-    const datasource = dataSourceRefs[selectedDatasourceIndex]?.current;
-    if (!datasource) {
-      return;
-    }
-    // Check if we can play the listen with the selected datasource
-    // otherwise skip to the next datasource without trying or setting currentDataSourceIndex
-    // This prevents rendering datasource iframes when we can't use the datasource
-    if (
-      !isListenFromDatasource(listen, datasource) &&
-      !datasource.canSearchAndPlayTracks()
-    ) {
-      playListen(listen, nextListenIndex, datasourceIndex + 1);
-      return;
-    }
-    stopOtherBrainzPlayers();
-    dispatch({ currentDataSourceIndex: selectedDatasourceIndex }, async () => {
-      while (
-        currentListenRef.current !== listen ||
-        currentDataSourceIndexRef.current !== selectedDatasourceIndex
-      ) {
-        // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      window.postMessage(
+        {
+          brainzplayer_event: "current-listen-change",
+          payload: omit(listen, "id"),
+        },
+        window.location.origin
+      );
+
+      let selectedDatasourceIndex: number;
+      if (datasourceIndex === 0) {
+        /** If available, retrieve the service the listen was listened with */
+        const listenedFromIndex = dataSourceRefs.findIndex((datasourceRef) => {
+          const { current } = datasourceRef;
+          return isListenFromDatasource(listen, current);
+        });
+        selectedDatasourceIndex =
+          listenedFromIndex === -1 ? 0 : listenedFromIndex;
+      } else {
+        /** If no matching datasource was found, revert to the default bahaviour
+         * (try playing from source 0 or try next source)
+         */
+        selectedDatasourceIndex = datasourceIndex;
       }
-      datasource.playListen(listen);
-    });
-  };
+
+      const datasource = dataSourceRefs[selectedDatasourceIndex]?.current;
+      if (!datasource) {
+        return;
+      }
+      // Check if we can play the listen with the selected datasource
+      // otherwise skip to the next datasource without trying or setting currentDataSourceIndex
+      // This prevents rendering datasource iframes when we can't use the datasource
+      if (
+        !isListenFromDatasource(listen, datasource) &&
+        !datasource.canSearchAndPlayTracks()
+      ) {
+        playListen(listen, nextListenIndex, datasourceIndex + 1);
+        return;
+      }
+      stopOtherBrainzPlayers();
+      dispatch(
+        { currentDataSourceIndex: selectedDatasourceIndex },
+        async () => {
+          const {
+            currentDataSourceIndex,
+            currentListen,
+          } = brainzPlayerContextRef.current;
+          while (
+            currentListen !== listen ||
+            currentDataSourceIndex !== selectedDatasourceIndex
+          ) {
+            // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          datasource.playListen(listen);
+        }
+      );
+    },
+    [dataSourceRefs, dispatch]
+  );
 
   const stopPlayerStateTimer = React.useCallback((): void => {
     debouncedCheckProgressAndSubmitListen.flush();
@@ -557,92 +552,111 @@ export default function BrainzPlayer() {
     playerStateTimerID.current = null;
   }, [debouncedCheckProgressAndSubmitListen]);
 
-  const playNextTrack = (invert: boolean = false): void => {
-    if (!isActivatedRef.current) {
-      // Player has not been activated by the user, do nothing.
-      return;
-    }
-    debouncedCheckProgressAndSubmitListen.flush();
+  const playNextTrack = React.useCallback(
+    (invert: boolean = false): void => {
+      const {
+        currentListenIndex,
+        isActivated,
+        queue,
+        ambientQueue,
+        queueRepeatMode,
+      } = brainzPlayerContextRef.current;
+      if (!isActivated) {
+        // Player has not been activated by the user, do nothing.
+        return;
+      }
+      debouncedCheckProgressAndSubmitListen.flush();
 
-    const currentQueue = queueRef.current;
-    const currentAmbientQueue = ambientQueueRef.current;
+      const currentQueue = queue;
+      const currentAmbientQueue = ambientQueue;
 
-    if (currentQueue.length === 0 && currentAmbientQueue.length === 0) {
-      handleWarning(
-        "You can try loading listens or refreshing the page",
-        "No listens to play"
-      );
-      return;
-    }
-
-    const currentPlayingListenIndex = currentListenIndexRef.current;
-
-    let nextListenIndex: number;
-    // If the queue repeat mode is one, then play the same track again
-    if (queueRepeatMode === QueueRepeatModes.one) {
-      nextListenIndex =
-        currentPlayingListenIndex + (currentPlayingListenIndex < 0 ? 1 : 0);
-    } else {
-      // Otherwise, play the next track in the queue
-      nextListenIndex = currentPlayingListenIndex + (invert === true ? -1 : 1);
-    }
-
-    // If nextListenIndex is less than 0, wrap around to the last track in the queue
-    if (nextListenIndex < 0) {
-      nextListenIndex = currentQueue.length - 1;
-    }
-
-    // If nextListenIndex is within the queue length, play the next track
-    if (nextListenIndex < currentQueue.length) {
-      const nextListen = currentQueue[nextListenIndex];
-      playListen(nextListen, nextListenIndex, 0);
-      return;
-    }
-
-    // If the nextListenIndex is greater than the queue length, i.e. the queue has ended, then there are three possibilities:
-    // 1. If there are listens in the ambient queue, then play the first listen in the ambient queue.
-    //    In this case, we'll move the first listen from the ambient queue to the main queue and play it.
-    // 2. If there are no listens in the ambient queue, then play the first listen in the main queue.
-    if (currentAmbientQueue.length > 0) {
-      const ambientQueueTop = currentAmbientQueue.shift();
-      if (ambientQueueTop) {
-        const currentQueueLength = currentQueue.length;
-        dispatch(
-          {
-            type: "ADD_LISTEN_TO_BOTTOM_OF_QUEUE",
-            data: ambientQueueTop,
-          },
-          async () => {
-            while (queueRef.current.length !== currentQueueLength + 1) {
-              // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
-              await new Promise((resolve) => setTimeout(resolve, 100));
-            }
-            const nextListen = queueRef.current[currentQueueLength];
-            dispatch({ ambientQueue: currentAmbientQueue });
-            playListen(nextListen, currentQueueLength, 0);
-          }
+      if (currentQueue.length === 0 && currentAmbientQueue.length === 0) {
+        handleWarning(
+          "You can try loading listens or refreshing the page",
+          "No listens to play"
         );
         return;
       }
-    } else if (queueRepeatMode === QueueRepeatModes.off) {
-      // 3. If there are no listens in the ambient queue and the queue repeat mode is off, then stop the player
-      stopPlayerStateTimer();
-      reinitializeWindowTitle();
-      return;
-    }
 
-    // If there are no listens in the ambient queue, then play the first listen in the main queue
-    nextListenIndex = 0;
-    const nextListen = currentQueue[nextListenIndex];
-    if (!nextListen) {
-      handleWarning(
-        "You can try loading listens or refreshing the page",
-        "No listens to play"
-      );
-      return;
-    }
-    playListen(nextListen, nextListenIndex, 0);
-  };
+      const currentPlayingListenIndex = currentListenIndex;
+
+      let nextListenIndex: number;
+      // If the queue repeat mode is one, then play the same track again
+      if (queueRepeatMode === QueueRepeatModes.one) {
+        nextListenIndex =
+          currentPlayingListenIndex + (currentPlayingListenIndex < 0 ? 1 : 0);
+      } else {
+        // Otherwise, play the next track in the queue
+        nextListenIndex =
+          currentPlayingListenIndex + (invert === true ? -1 : 1);
+      }
+
+      // If nextListenIndex is less than 0, wrap around to the last track in the queue
+      if (nextListenIndex < 0) {
+        nextListenIndex = currentQueue.length - 1;
+      }
+
+      // If nextListenIndex is within the queue length, play the next track
+      if (nextListenIndex < currentQueue.length) {
+        const nextListen = currentQueue[nextListenIndex];
+        playListen(nextListen, nextListenIndex, 0);
+        return;
+      }
+
+      // If the nextListenIndex is greater than the queue length, i.e. the queue has ended, then there are three possibilities:
+      // 1. If there are listens in the ambient queue, then play the first listen in the ambient queue.
+      //    In this case, we'll move the first listen from the ambient queue to the main queue and play it.
+      // 2. If there are no listens in the ambient queue, then play the first listen in the main queue.
+      if (currentAmbientQueue.length > 0) {
+        const ambientQueueTop = currentAmbientQueue.shift();
+        if (ambientQueueTop) {
+          const currentQueueLength = currentQueue.length;
+          dispatch(
+            {
+              type: "ADD_LISTEN_TO_BOTTOM_OF_QUEUE",
+              data: ambientQueueTop,
+            },
+            async () => {
+              while (queue.length !== currentQueueLength + 1) {
+                // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
+                await new Promise((resolve) => setTimeout(resolve, 100));
+              }
+              const nextListen = queue[currentQueueLength];
+              dispatch({
+                ambientQueue: currentAmbientQueue,
+              });
+              playListen(nextListen, currentQueueLength, 0);
+            }
+          );
+          return;
+        }
+      } else if (queueRepeatMode === QueueRepeatModes.off) {
+        // 3. If there are no listens in the ambient queue and the queue repeat mode is off, then stop the player
+        stopPlayerStateTimer();
+        reinitializeWindowTitle();
+        return;
+      }
+
+      // If there are no listens in the ambient queue, then play the first listen in the main queue
+      nextListenIndex = 0;
+      const nextListen = currentQueue[nextListenIndex];
+      if (!nextListen) {
+        handleWarning(
+          "You can try loading listens or refreshing the page",
+          "No listens to play"
+        );
+        return;
+      }
+      playListen(nextListen, nextListenIndex, 0);
+    },
+    [
+      debouncedCheckProgressAndSubmitListen,
+      dispatch,
+      playListen,
+      reinitializeWindowTitle,
+      stopPlayerStateTimer,
+    ]
+  );
 
   const playPreviousTrack = (): void => {
     playNextTrack(true);
@@ -653,7 +667,11 @@ export default function BrainzPlayer() {
   };
 
   const seekToPositionMs = (msTimecode: number): void => {
-    if (!isActivatedRef.current) {
+    const {
+      currentDataSourceIndex,
+      isActivated,
+    } = brainzPlayerContextRef.current;
+    if (!isActivated) {
       // Player has not been activated by the user, do nothing.
       return;
     }
@@ -667,10 +685,12 @@ export default function BrainzPlayer() {
   };
 
   const seekForward = (): void => {
+    const { progressMs } = brainzPlayerContextRef.current;
     seekToPositionMs(progressMs + SEEK_TIME_MILLISECONDS);
   };
 
   const seekBackward = (): void => {
+    const { progressMs } = brainzPlayerContextRef.current;
     seekToPositionMs(progressMs - SEEK_TIME_MILLISECONDS);
   };
 
@@ -690,6 +710,10 @@ export default function BrainzPlayer() {
 
   const togglePlay = React.useCallback(async (): Promise<void> => {
     try {
+      const {
+        currentDataSourceIndex,
+        playerPaused,
+      } = brainzPlayerContextRef.current;
       const dataSource = dataSourceRefs[currentDataSourceIndex]?.current;
       if (!dataSource) {
         invalidateDataSource();
@@ -702,12 +726,7 @@ export default function BrainzPlayer() {
     } catch (error) {
       handleError(error, "Could not play");
     }
-  }, [
-    currentDataSourceIndex,
-    dataSourceRefs,
-    playerPaused,
-    invalidateDataSource,
-  ]);
+  }, [dataSourceRefs, invalidateDataSource]);
 
   /* Updating the progress bar without calling any API to check current player state */
   const updatePlayerProgressBar = (): void => {
@@ -724,21 +743,20 @@ export default function BrainzPlayer() {
 
   /* Listeners for datasource events */
   const failedToPlayTrack = (): void => {
-    if (!isActivatedRef.current) {
+    const {
+      currentDataSourceIndex,
+      currentListen,
+      currentListenIndex,
+      isActivated,
+    } = brainzPlayerContextRef.current;
+    if (!isActivated) {
       // Player has not been activated by the user, do nothing.
       return;
     }
 
-    if (
-      currentListenRef.current &&
-      currentDataSourceIndex < dataSourceRefs.length - 1
-    ) {
+    if (currentListen && currentDataSourceIndex < dataSourceRefs.length - 1) {
       // Try playing the listen with the next dataSource
-      playListen(
-        currentListenRef.current,
-        currentListenIndexRef.current,
-        currentDataSourceIndex + 1
-      );
+      playListen(currentListen, currentListenIndex, currentDataSourceIndex + 1);
     } else {
       handleWarning(
         <>
@@ -790,6 +808,7 @@ export default function BrainzPlayer() {
     album?: string,
     artwork?: Array<MediaImage>
   ): void => {
+    const { playerPaused } = brainzPlayerContextRef.current;
     dispatch(
       {
         currentTrackName: title,
@@ -799,12 +818,12 @@ export default function BrainzPlayer() {
       },
       () => {
         updateWindowTitleWithTrackName();
-        if (!playerPausedRef.current) {
+        if (!playerPaused) {
           submitNowPlayingToListenBrainz();
         }
       }
     );
-    if (playerPausedRef.current) {
+    if (playerPaused) {
       // Don't send notifications or any of that if the player is not playing
       // (Avoids getting notifications upon pausing a track)
       return;
@@ -844,10 +863,11 @@ export default function BrainzPlayer() {
   };
 
   const clearQueue = async (): Promise<void> => {
-    const currentQueue = queueRef.current;
+    const { queue, currentListenIndex } = brainzPlayerContextRef.current;
+    const currentQueue = queue;
 
     // Clear the queue by keeping only the currently playing song
-    const currentPlayingListenIndex = currentListenIndexRef.current;
+    const currentPlayingListenIndex = currentListenIndex;
     dispatch({
       queue: currentQueue[currentPlayingListenIndex]
         ? [currentQueue[currentPlayingListenIndex]]
@@ -855,47 +875,58 @@ export default function BrainzPlayer() {
     });
   };
 
-  const playNextListenFromQueue = (datasourceIndex: number = 0): void => {
-    const currentPlayingListenIndex = currentListenIndexRef.current;
-    const nextTrack = queueRef.current[currentPlayingListenIndex + 1];
-    playListen(nextTrack, currentPlayingListenIndex + 1, datasourceIndex);
-  };
+  const playNextListenFromQueue = React.useCallback(
+    (datasourceIndex: number = 0): void => {
+      const { queue, currentListenIndex } = brainzPlayerContextRef.current;
+      const currentPlayingListenIndex = currentListenIndex;
+      const nextTrack = queue[currentPlayingListenIndex + 1];
+      playListen(nextTrack, currentPlayingListenIndex + 1, datasourceIndex);
+    },
+    [playListen]
+  );
 
-  const playListenEventHandler = (listen: Listen | JSPFTrack) => {
-    dispatch(
-      {
-        type: "ADD_LISTEN_TO_TOP_OF_QUEUE",
-        data: listen,
-      },
-      () => {
-        playNextListenFromQueue();
-      }
-    );
-  };
-
-  const playAmbientQueue = (tracks: BrainzPlayerQueue): void => {
-    // 1. Clear the items in the queue after the current playing track
-    const currentPlayingListenIndex = currentListenIndexRef.current;
-    dispatch(
-      {
-        type: "CLEAR_QUEUE_AFTER_CURRENT_AND_SET_AMBIENT_QUEUE",
-        data: tracks,
-        isActivated: true,
-      },
-      async () => {
-        while (
-          queueRef.current.length !== currentPlayingListenIndex + 1 &&
-          isActivatedRef.current
-        ) {
-          // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
-          await new Promise((resolve) => setTimeout(resolve, 100));
+  const playListenEventHandler = React.useCallback(
+    (listen: Listen | JSPFTrack) => {
+      dispatch(
+        {
+          type: "ADD_LISTEN_TO_TOP_OF_QUEUE",
+          data: listen,
+        },
+        () => {
+          playNextListenFromQueue();
         }
+      );
+    },
+    [dispatch, playNextListenFromQueue]
+  );
 
-        // 2. Play the first item in the ambient queue
-        playNextTrack();
-      }
-    );
-  };
+  const playAmbientQueue = React.useCallback(
+    (tracks: BrainzPlayerQueue): void => {
+      const {
+        queue,
+        currentListenIndex,
+        isActivated,
+      } = brainzPlayerContextRef.current;
+      // 1. Clear the items in the queue after the current playing track
+      dispatch(
+        {
+          type: "CLEAR_QUEUE_AFTER_CURRENT_AND_SET_AMBIENT_QUEUE",
+          data: tracks,
+          isActivated: true,
+        },
+        async () => {
+          while (queue.length !== currentListenIndex + 1 && isActivated) {
+            // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          // 2. Play the first item in the ambient queue
+          playNextTrack();
+        }
+      );
+    },
+    [dispatch, playNextTrack]
+  );
 
   // eslint-disable-next-line react/sort-comp
   const throttledTrackInfoChange = _throttle(trackInfoChange, 2000, {
@@ -903,49 +934,58 @@ export default function BrainzPlayer() {
     trailing: true,
   });
 
-  const receiveBrainzPlayerMessage = (event: MessageEvent) => {
-    if (event.origin !== window.location.origin) {
-      // Received postMessage from different origin, ignoring it
-      return;
-    }
-    const { brainzplayer_event, payload } = event.data;
-    if (!brainzplayer_event) {
-      return;
-    }
-    if (userPreferences?.brainzplayer) {
-      if (brainzPlayerDisabled) {
-        toast.info(
-          <ToastMsg
-            title="BrainzPlayer disabled"
-            message={
-              <>
-                You have disabled all music services for playback on
-                ListenBrainz. To enable them again, please go to the{" "}
-                <Link to="/settings/brainzplayer/">
-                  music player preferences
-                </Link>{" "}
-                page
-              </>
-            }
-          />
-        );
+  const receiveBrainzPlayerMessage = React.useCallback(
+    (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        // Received postMessage from different origin, ignoring it
         return;
       }
-    }
-    switch (brainzplayer_event) {
-      case "play-listen":
-        playListenEventHandler(payload);
-        break;
-      case "force-play":
-        togglePlay();
-        break;
-      case "play-ambient-queue":
-        playAmbientQueue(payload);
-        break;
-      default:
-      // do nothing
-    }
-  };
+      const { brainzplayer_event, payload } = event.data;
+      if (!brainzplayer_event) {
+        return;
+      }
+      if (userPreferences?.brainzplayer) {
+        if (brainzPlayerDisabled) {
+          toast.info(
+            <ToastMsg
+              title="BrainzPlayer disabled"
+              message={
+                <>
+                  You have disabled all music services for playback on
+                  ListenBrainz. To enable them again, please go to the{" "}
+                  <Link to="/settings/brainzplayer/">
+                    music player preferences
+                  </Link>{" "}
+                  page
+                </>
+              }
+            />
+          );
+          return;
+        }
+      }
+      switch (brainzplayer_event) {
+        case "play-listen":
+          playListenEventHandler(payload);
+          break;
+        case "force-play":
+          togglePlay();
+          break;
+        case "play-ambient-queue":
+          playAmbientQueue(payload);
+          break;
+        default:
+        // do nothing
+      }
+    },
+    [
+      brainzPlayerDisabled,
+      playAmbientQueue,
+      playListenEventHandler,
+      togglePlay,
+      userPreferences?.brainzplayer,
+    ]
+  );
 
   React.useEffect(() => {
     window.addEventListener("storage", onLocalStorageEvent);
@@ -970,16 +1010,38 @@ export default function BrainzPlayer() {
       window.removeEventListener("beforeunload", alertBeforeClosingPage);
       stopPlayerStateTimer();
     };
-  }, []);
+  }, [
+    invalidateDataSource,
+    onLocalStorageEvent,
+    receiveBrainzPlayerMessage,
+    soundcloudAuth,
+    spotifyAuth,
+    stopPlayerStateTimer,
+  ]);
 
   const { pathname } = useLocation();
+
+  const {
+    queue,
+    ambientQueue,
+    playerPaused,
+    currentTrackName,
+    currentTrackArtist,
+    currentListen,
+    currentDataSourceIndex,
+    currentTrackURL,
+    progressMs,
+    durationMs,
+    isActivated,
+    volume,
+  } = brainzPlayerContextRef.current;
 
   // Hide the player if user is on homepage and the player is not activated, and there are nothing in both the queue
   if (
     pathname === "/" &&
     !isActivated &&
-    queueRef.current.length === 0 &&
-    ambientQueueRef.current.length === 0
+    queue.length === 0 &&
+    ambientQueue.length === 0
   ) {
     return null;
   }
