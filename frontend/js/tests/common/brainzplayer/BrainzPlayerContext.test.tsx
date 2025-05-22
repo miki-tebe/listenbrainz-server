@@ -34,7 +34,7 @@ type MockListen = {
     };
   };
   // Add other Listen properties if needed by listenOrJSPFTrackToQueueItem's key generation
-  listened_at?: number;
+  listened_at: number; // Changed from optional to required
   inserted_at?: number;
 };
 
@@ -42,17 +42,19 @@ type MockListen = {
 const createMockListen = (
   name: string,
   idSuffix: string,
-  msid?: string
+  msid?: string,
+  releaseName?: string // Added releaseName parameter
 ): MockListen => ({
   track_metadata: {
     track_name: name,
     artist_name: `Artist for ${name}`,
-    release_name: `Album for ${name}`,
+    release_name: releaseName || `Test Album ${idSuffix}`, // Use provided or default
     mbid_mapping: {
       recording_mbid: `mbid-${idSuffix}`,
       ...(msid && { recording_msid: msid }), // Ensure MSID is present for key generation
     },
   },
+  listened_at: Date.now(), // Ensure listened_at is always a number
   inserted_at: Date.now(), // for unique key generation
 });
 
@@ -79,11 +81,11 @@ describe('BrainzPlayerContext Shuffle Action', () => {
   // Test Case 1: Shuffle only tracks after the current listen.
   it('should only shuffle tracks after the current listen index', () => {
     const mockListens: MockListen[] = [
-      createMockListen('Track 1', '1', 'msid-1'),
-      createMockListen('Track 2', '2', 'msid-2'),
-      createMockListen('Track 3', '3', 'msid-3'),
-      createMockListen('Track 4', '4', 'msid-4'),
-      createMockListen('Track 5', '5', 'msid-5'),
+      createMockListen('Track 1', '1', 'msid-1', 'Album A'),
+      createMockListen('Track 2', '2', 'msid-2', 'Album A'),
+      createMockListen('Track 3', '3', 'msid-3', 'Album B'),
+      createMockListen('Track 4', '4', 'msid-4', 'Album B'),
+      createMockListen('Track 5', '5', 'msid-5', 'Album C'),
     ];
     const initialQueue = mockListens.map(listenOrJSPFTrackToQueueItem);
     const currentListenIndex = 1; // Track 2 is current
@@ -135,10 +137,10 @@ describe('BrainzPlayerContext Shuffle Action', () => {
   // Test Case 2: Shuffle when currentListenIndex is -1
   it('should shuffle all tracks when currentListenIndex is -1', () => {
     const mockListens: MockListen[] = [
-      createMockListen('Track A', 'A', 'msid-A'),
-      createMockListen('Track B', 'B', 'msid-B'),
-      createMockListen('Track C', 'C', 'msid-C'),
-      createMockListen('Track D', 'D', 'msid-D'),
+      createMockListen('Track A', 'A', 'msid-A', 'Album X'),
+      createMockListen('Track B', 'B', 'msid-B', 'Album X'),
+      createMockListen('Track C', 'C', 'msid-C', 'Album Y'),
+      createMockListen('Track D', 'D', 'msid-D', 'Album Y'),
     ];
     const initialQueue = mockListens.map(listenOrJSPFTrackToQueueItem);
     const currentListenIndex = -1;
@@ -179,9 +181,9 @@ describe('BrainzPlayerContext Shuffle Action', () => {
   // Test Case 3: Shuffle when currentListenIndex is the last track
   it('should not change the queue if currentListenIndex is the last track', () => {
     const mockListens: MockListen[] = [
-      createMockListen('Track X', 'X', 'msid-X'),
-      createMockListen('Track Y', 'Y', 'msid-Y'),
-      createMockListen('Track Z', 'Z', 'msid-Z'),
+      createMockListen('Track X', 'X', 'msid-X', 'Album Q'),
+      createMockListen('Track Y', 'Y', 'msid-Y', 'Album Q'),
+      createMockListen('Track Z', 'Z', 'msid-Z', 'Album R'),
     ];
     const initialQueue = mockListens.map(listenOrJSPFTrackToQueueItem);
     const currentListenIndex = initialQueue.length - 1;
@@ -241,7 +243,7 @@ describe('BrainzPlayerContext Shuffle Action', () => {
 
   // Test Case 5: Shuffle a queue with only one track
   it('should not change the queue if it has only one track', () => {
-    const mockListens: MockListen[] = [createMockListen('Solo Track', 'solo', 'msid-solo')];
+    const mockListens: MockListen[] = [createMockListen('Solo Track', 'solo', 'msid-solo', 'Album Solo')];
     const initialQueue = mockListens.map(listenOrJSPFTrackToQueueItem);
     const currentListenIndex = 0;
 
@@ -277,7 +279,7 @@ describe('BrainzPlayerContext Shuffle Action - Detailed Suffix Shuffle Check', (
   it('should robustly verify that the suffix of the queue is shuffled', () => {
     const trackCount = 10; // Use enough tracks to make accidental same order unlikely
     const mockListens: MockListen[] = Array.from({ length: trackCount }, (_, i) =>
-      createMockListen(`Track ${i + 1}`, `${i + 1}`, `msid-${i + 1}`)
+      createMockListen(`Track ${i + 1}`, `${i + 1}`, `msid-${i + 1}`, `Album ${i % 3}`) // Add some album variety
     );
     const initialQueue = mockListens.map(listenOrJSPFTrackToQueueItem);
     const currentListenIndex = 2; // e.g., Track 3
